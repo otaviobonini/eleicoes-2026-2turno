@@ -118,17 +118,21 @@ tr:last-child td { border-bottom: 0; }
 .proj > div { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
 .proj .big { font: 800 22px/1.15 var(--display); text-wrap: balance; }
 .proj .big span { color: var(--cc); }
-.tiles { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; max-width: 560px; }
-.tile { aspect-ratio: 1; border-radius: 6px; display: grid; place-content: center; text-align: center; font-size: 11px; line-height: 1.2; background: var(--track); color: var(--fg); }
-.tile b { font: 800 14px var(--display); }
-.tile small { font-size: 10px; opacity: .8; }
+.mapa { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.mapa svg { width: 100%; max-width: 680px; height: auto; margin: 0 auto; display: block; }
+.mapa path { stroke: var(--card); stroke-width: 1.2; stroke-linejoin: round; transition: fill .6s ease; }
+.mapa path:hover { stroke: var(--fg); stroke-width: 2; }
+.mapa text { font: 700 11px var(--display); fill: var(--fg); paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.mapa text .pc { font: 600 10px var(--body); }
+.mapa text.sm { font-size: 8px; }
+.mapa line { stroke: var(--muted); stroke-width: .8; }
+.mapa circle { fill: var(--fg); }
 .legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
 .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--cc); vertical-align: -1px; }
 .note { font-size: 12px; color: var(--muted); }
 .note a { color: inherit; }
 .error { background: color-mix(in srgb, var(--c13) 10%, var(--card)); border: 1px solid var(--c13); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
 @media (max-width: 560px) {
-  .tile { font-size: 9px; } .tile b { font-size: 11px; } .tile small { display: none; }
   .faceoff { grid-template-columns: 1fr; }
   .vs { display: none; }
   .cand.right { flex-direction: row; text-align: left; }
@@ -162,8 +166,10 @@ tr:last-child td { border-bottom: 0; }
   <section class="proj" id="proj"></section>
 
   <h2>Mapa por estado</h2>
-  <section class="tiles" id="mapa"></section>
-  <div class="legenda" id="legenda"></div>
+  <section class="mapa">
+    <svg id="mapa" role="img" aria-label="Mapa do Brasil com o candidato que lidera em cada estado"></svg>
+    <div class="legenda" id="legenda"></div>
+  </section>
 
   <h2>Por região</h2>
   <section class="regions" id="regions"></section>
@@ -175,6 +181,7 @@ tr:last-child td { border-bottom: 0; }
   </p>
 </div>
 
+<script src="mapa-brasil.js"></script>
 <script>
 // Eleição e cargo podem ser trocados pela URL: /?e=6258&c=1
 const qs = new URLSearchParams(location.search);
@@ -336,16 +343,6 @@ function renderRegioes(porUF) {
   abertos.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
 }
 
-// Posição de cada UF no mapa em grade [coluna, linha]
-const GRADE = {
-  RR: [2, 0], AP: [4, 0],
-  AM: [1, 1], PA: [3, 1], MA: [4, 1], CE: [5, 1], RN: [6, 1],
-  AC: [0, 2], RO: [1, 2], MT: [2, 2], TO: [3, 2], PI: [4, 2], PE: [5, 2], PB: [6, 2],
-  MS: [1, 3], GO: [2, 3], DF: [3, 3], BA: [4, 3], SE: [5, 3], AL: [6, 3],
-  SP: [2, 4], MG: [3, 4], ES: [4, 4],
-  PR: [2, 5], RJ: [3, 5], SC: [2, 6], RS: [2, 7], ZZ: [6, 7],
-};
-
 function renderExtras(porUF) {
   const br = porUF.BR;
   if (!br || !ordem.length) return;
@@ -387,26 +384,55 @@ function renderExtras(porUF) {
       <div class="note num">${pr.map(([n, v]) => `${esc(nomeDe(n))} ${fmtPct(v / totProj * 100)}`).join(" × ")}. Supõe que o restante de cada estado vote como o já apurado lá; não é previsão oficial.</div>
     </div>`;
 
-  // Mapa em grade: cor de quem lidera, mais forte quanto maior a vantagem
-  document.getElementById("mapa").innerHTML = Object.entries(GRADE).map(([u, [col, row]]) => {
-    const r = porUF[u];
-    let estilo = "", txt = "—", pApu = 0, dica = u;
-    if (r) {
-      pApu = r.secTot ? r.secApu / r.secTot * 100 : 0;
-      const rk = [...r.cands].sort((x, y) => y.votos - x.votos);
-      if (r.validos && rk[0]) {
-        const p1 = rk[0].votos / r.validos * 100, p2 = rk[1] ? rk[1].votos / r.validos * 100 : 0;
-        const forca = Math.min(65, 20 + (p1 - p2) * 1.5);
-        estilo = `background:color-mix(in srgb, ${corDe(rk[0].n)} ${forca}%, var(--card));`;
-        txt = fmtPct(p1, 0);
-        dica = `${u}: ${rk[0].nome} ${fmtPct(p1, 1)} · ${fmtPct(pApu, 1)} das urnas`;
-      }
-    }
-    return `<div class="tile" title="${esc(dica)}" style="grid-column:${col + 1};grid-row:${row + 1};${estilo}">
-      <b>${u === "ZZ" ? "EXT" : u}</b><span class="num">${txt}</span><small class="num">${fmtPct(pApu, 0)} urnas</small></div>`;
-  }).join("");
+  renderMapa(porUF);
   document.getElementById("legenda").innerHTML = ordem.map(c => `<span style="--cc:${corDe(c.n)}"><i></i>${esc(c.nome)} lidera</span>`).join("")
-    + `<span>Cor mais forte = vantagem maior · % = votos do líder</span>`;
+    + `<span>Cor mais forte = vantagem maior · % = votos válidos do líder · passe o mouse num estado para detalhes</span>`;
+}
+
+// Mapa: cor de quem lidera, mais forte quanto maior a vantagem.
+// Estados pequenos do litoral ganham rótulo do lado de fora, com linha.
+const CALLOUT = ["RN", "PB", "PE", "AL", "SE", "ES", "RJ"];
+function renderMapa(porUF) {
+  if (typeof MAPA_BR === "undefined") return;
+  const M = MAPA_BR, W = M.w, H = M.h;
+  const info = u => {
+    const r = porUF[u];
+    if (!r) return null;
+    const pApu = r.secTot ? r.secApu / r.secTot * 100 : 0;
+    const rk = [...r.cands].sort((x, y) => y.votos - x.votos);
+    if (!r.validos || !rk[0]) return { pApu };
+    const p1 = rk[0].votos / r.validos * 100, p2 = rk[1] ? rk[1].votos / r.validos * 100 : 0;
+    return { pApu, p1, nome: rk[0].nome, cor: corDe(rk[0].n), forca: Math.min(85, 28 + (p1 - p2) * 2) };
+  };
+  const fill = i => i?.cor ? `color-mix(in srgb, ${i.cor} ${i.forca}%, var(--card))` : "var(--track)";
+  const dica = (nome, i) => !i ? `${nome}: sem dados` : i.cor
+    ? `${nome}: ${i.nome} ${fmtPct(i.p1, 1)} · ${fmtPct(i.pApu, 1)} das urnas apuradas`
+    : `${nome}: ${fmtPct(i.pApu, 1)} das urnas apuradas`;
+
+  let formas = "", rotulos = "", ultimoY = -99;
+  const ordemCallout = CALLOUT.filter(u => M.uf[u]).sort((a, b) => M.uf[a].y - M.uf[b].y);
+  for (const [u, g] of Object.entries(M.uf)) {
+    const i = info(u);
+    formas += `<path d="${g.d}" style="fill:${fill(i)}"><title>${esc(dica(u, i))}</title></path>`;
+    if (CALLOUT.includes(u)) continue;
+    const pc = i?.cor ? fmtPct(i.p1, 0) : "";
+    rotulos += u === "DF"
+      ? `<text class="sm" x="${g.x}" y="${g.y + 3}" text-anchor="middle">DF</text>`
+      : `<text x="${g.x}" y="${g.y}" text-anchor="middle"><tspan x="${g.x}" dy="-.15em">${u}</tspan><tspan class="pc num" x="${g.x}" dy="1.15em">${pc}</tspan></text>`;
+  }
+  for (const u of ordemCallout) {
+    const g = M.uf[u], i = info(u);
+    const ly = Math.max(g.y, ultimoY + 16); ultimoY = ly;
+    const lx = W - 62;
+    rotulos += `<line x1="${g.x}" y1="${g.y}" x2="${lx - 4}" y2="${ly}"/><circle cx="${g.x}" cy="${g.y}" r="1.6"/>`
+      + `<text x="${lx}" y="${ly + 4}">${u} <tspan class="pc num">${i?.cor ? fmtPct(i.p1, 0) : ""}</tspan></text>`;
+  }
+  const z = info("ZZ");
+  formas += `<rect x="16" y="${H - 64}" width="92" height="48" rx="6" style="fill:${fill(z)}"><title>${esc(dica("Exterior", z))}</title></rect>`;
+  rotulos += `<text x="62" y="${H - 44}" text-anchor="middle"><tspan x="62">Exterior</tspan><tspan class="pc num" x="62" dy="1.2em">${z?.cor ? fmtPct(z.p1, 0) : ""}</tspan></text>`;
+  const svg = document.getElementById("mapa");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = formas + rotulos;
 }
 
 // Tempo real: a cada POLL_S segundos baixa só o arquivo nacional (1 requisição).
