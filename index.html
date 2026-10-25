@@ -113,10 +113,22 @@ td .mini > span { display: block; height: 100%; background: var(--urna); }
 td.win { font-weight: 700; color: var(--cc); }
 tr:last-child td { border-bottom: 0; }
 
+.banner { background: var(--cc, var(--urna)); color: #fff; border-radius: 10px; padding: 14px 18px; font: 800 clamp(18px, 3vw, 24px)/1.2 var(--display); text-align: center; text-wrap: balance; }
+.proj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.proj > div { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
+.proj .big { font: 800 22px/1.15 var(--display); text-wrap: balance; }
+.proj .big span { color: var(--cc); }
+.tiles { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; max-width: 560px; }
+.tile { aspect-ratio: 1; border-radius: 6px; display: grid; place-content: center; text-align: center; font-size: 11px; line-height: 1.2; background: var(--track); color: var(--fg); }
+.tile b { font: 800 14px var(--display); }
+.tile small { font-size: 10px; opacity: .8; }
+.legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--cc); vertical-align: -1px; }
 .note { font-size: 12px; color: var(--muted); }
 .note a { color: inherit; }
 .error { background: color-mix(in srgb, var(--c13) 10%, var(--card)); border: 1px solid var(--c13); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
 @media (max-width: 560px) {
+  .tile { font-size: 9px; } .tile b { font-size: 11px; } .tile small { display: none; }
   .faceoff { grid-template-columns: 1fr; }
   .vs { display: none; }
   .cand.right { flex-direction: row; text-align: left; }
@@ -141,9 +153,17 @@ tr:last-child td { border-bottom: 0; }
 
   <div id="err" class="error" hidden></div>
 
+  <div id="banner" class="banner" hidden></div>
+
   <section class="national" id="national" aria-live="polite">
     <div class="note">Buscando resultado nacional…</div>
   </section>
+
+  <section class="proj" id="proj"></section>
+
+  <h2>Mapa por estado</h2>
+  <section class="tiles" id="mapa"></section>
+  <div class="legenda" id="legenda"></div>
 
   <h2>Por região</h2>
   <section class="regions" id="regions"></section>
@@ -201,13 +221,14 @@ function resumo(d) {
   for (const a of d.carg?.[0]?.agr ?? [])
     for (const p of a.par ?? [])
       for (const c of p.cand ?? [])
-        cands.push({ n: c.n, nome: c.nmu, sq: c.sqcand, partido: p.sg, votos: num(c.vap) });
+        cands.push({ n: c.n, nome: c.nmu, sq: c.sqcand, partido: p.sg, votos: num(c.vap), eleito: c.e === "s" });
   return {
     secTot: num(d.s?.ts), secApu: num(d.s?.st),
     validos: num(d.v?.vv), total: num(d.v?.tv), brancos: num(d.v?.vb), nulos: num(d.v?.tvn),
     eleitorado: num(d.e?.te), comparec: num(d.e?.c), pComparec: num(d.e?.pc),
     hora: `${d.dt ?? d.dg} ${d.ht ?? d.hg}`,
     versao: `${d.idg}|${d.dg} ${d.hg}`,
+    est: num(d.e?.est), esnt: num(d.e?.esnt), md: d.md === "s",
     cands,
   };
 }
@@ -315,6 +336,79 @@ function renderRegioes(porUF) {
   abertos.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
 }
 
+// Posição de cada UF no mapa em grade [coluna, linha]
+const GRADE = {
+  RR: [2, 0], AP: [4, 0],
+  AM: [1, 1], PA: [3, 1], MA: [4, 1], CE: [5, 1], RN: [6, 1],
+  AC: [0, 2], RO: [1, 2], MT: [2, 2], TO: [3, 2], PI: [4, 2], PE: [5, 2], PB: [6, 2],
+  MS: [1, 3], GO: [2, 3], DF: [3, 3], BA: [4, 3], SE: [5, 3], AL: [6, 3],
+  SP: [2, 4], MG: [3, 4], ES: [4, 4],
+  PR: [2, 5], RJ: [3, 5], SC: [2, 6], RS: [2, 7], ZZ: [6, 7],
+};
+
+function renderExtras(porUF) {
+  const br = porUF.BR;
+  if (!br || !ordem.length) return;
+  const nomeDe = n => ordem.find(c => c.n === n)?.nome ?? n;
+
+  // Aviso de eleito / matematicamente definido (marcados pelo próprio TSE)
+  const banner = document.getElementById("banner");
+  const eleito = br.cands.find(c => c.eleito);
+  const ranking = [...br.cands].sort((x, y) => y.votos - x.votos);
+  banner.hidden = !(eleito || br.md);
+  if (eleito) { banner.style.setProperty("--cc", corDe(eleito.n)); banner.textContent = `${eleito.nome} está eleito presidente`; }
+  else if (br.md) { banner.style.setProperty("--cc", corDe(ranking[0].n)); banner.textContent = `Resultado matematicamente definido: ${ranking[0].nome} vence`; }
+
+  // Projeção: em cada UF, o que falta apurar vota igual ao que já foi apurado ali
+  const taxaBR = br.est ? br.validos / br.est : 0;
+  const proj = Object.fromEntries(ordem.map(c => [c.n, 0]));
+  let faltam = 0;
+  for (const u of REGIOES.flatMap(r => r.ufs)) {
+    const r = porUF[u];
+    if (!r) continue;
+    const resto = r.esnt * (r.est && r.validos ? r.validos / r.est : taxaBR);
+    faltam += resto;
+    for (const c of r.cands)
+      proj[c.n] += c.votos + resto * (r.validos ? c.votos / r.validos : (br.cands.find(x => x.n === c.n)?.votos || 0) / (br.validos || 1));
+  }
+  const totProj = Object.values(proj).reduce((a, b) => a + b, 0) || 1;
+  const pr = Object.entries(proj).sort((a, b) => b[1] - a[1]);
+  const [l1, l2] = ranking;
+  const dif = l1 && l2 ? l1.votos - l2.votos : 0;
+  document.getElementById("proj").innerHTML = `
+    <div>
+      <div class="eyebrow">Diferença agora</div>
+      <div class="big" style="--cc:${corDe(l1.n)}"><span>${esc(l1.nome)}</span> à frente por <span class="num">${fmtInt(dif)}</span> votos</div>
+      <div class="note num">Faltam apurar cerca de ${fmtInt(Math.round(faltam))} votos válidos (estimativa pelo eleitorado das seções não totalizadas).</div>
+    </div>
+    <div>
+      <div class="eyebrow">Projeção</div>
+      <div class="big" style="--cc:${corDe(pr[0][0])}"><span>${esc(nomeDe(pr[0][0]))}</span> terminaria com <span class="num">${fmtPct(pr[0][1] / totProj * 100)}</span></div>
+      <div class="note num">${pr.map(([n, v]) => `${esc(nomeDe(n))} ${fmtPct(v / totProj * 100)}`).join(" × ")}. Supõe que o restante de cada estado vote como o já apurado lá; não é previsão oficial.</div>
+    </div>`;
+
+  // Mapa em grade: cor de quem lidera, mais forte quanto maior a vantagem
+  document.getElementById("mapa").innerHTML = Object.entries(GRADE).map(([u, [col, row]]) => {
+    const r = porUF[u];
+    let estilo = "", txt = "—", pApu = 0, dica = u;
+    if (r) {
+      pApu = r.secTot ? r.secApu / r.secTot * 100 : 0;
+      const rk = [...r.cands].sort((x, y) => y.votos - x.votos);
+      if (r.validos && rk[0]) {
+        const p1 = rk[0].votos / r.validos * 100, p2 = rk[1] ? rk[1].votos / r.validos * 100 : 0;
+        const forca = Math.min(65, 20 + (p1 - p2) * 1.5);
+        estilo = `background:color-mix(in srgb, ${corDe(rk[0].n)} ${forca}%, var(--card));`;
+        txt = fmtPct(p1, 0);
+        dica = `${u}: ${rk[0].nome} ${fmtPct(p1, 1)} · ${fmtPct(pApu, 1)} das urnas`;
+      }
+    }
+    return `<div class="tile" title="${esc(dica)}" style="grid-column:${col + 1};grid-row:${row + 1};${estilo}">
+      <b>${u === "ZZ" ? "EXT" : u}</b><span class="num">${txt}</span><small class="num">${fmtPct(pApu, 0)} urnas</small></div>`;
+  }).join("");
+  document.getElementById("legenda").innerHTML = ordem.map(c => `<span style="--cc:${corDe(c.n)}"><i></i>${esc(c.nome)} lidera</span>`).join("")
+    + `<span>Cor mais forte = vantagem maior · % = votos do líder</span>`;
+}
+
 // Tempo real: a cada POLL_S segundos baixa só o arquivo nacional (1 requisição).
 // Quando o TSE publica uma nova totalização, o arquivo muda e aí recarrega todas as UFs.
 let porUF = {}, versaoBR = "", ultimaCheck = 0, ultimaCompleta = 0, carregando = false, falhou = false;
@@ -341,10 +435,12 @@ async function verifica(forcar = false) {
     if (mudou) {
       const primeira = !versaoBR;
       versaoBR = br.versao;
+      porUF.BR = br;
       renderNacional(br);
       if (!primeira) pisca(document.getElementById("national"));
     }
     if (mudou || forcar || Date.now() - ultimaCompleta > FULL_S * 1000) await atualizaTudo();
+    renderExtras(porUF);
     falhou = false;
   } catch (e) {
     falhou = true;
