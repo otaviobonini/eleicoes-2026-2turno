@@ -118,7 +118,14 @@ tr:last-child td { border-bottom: 0; }
 .proj > div { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
 .proj .big { font: 800 22px/1.15 var(--display); text-wrap: balance; }
 .proj .big span { color: var(--cc); }
-.mapa { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.tip { position: absolute; z-index: 5; pointer-events: none; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 20px rgb(0 0 0 / .25); min-width: 200px; display: grid; gap: 5px; font-size: 13px; }
+.tip .t { font: 800 15px var(--display); }
+.tip .row { display: flex; justify-content: space-between; gap: 14px; }
+.tip .row b { font-weight: 700; }
+.tip .big { font: 800 20px var(--display); color: var(--urna); }
+.tip i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--cc); }
+.tip .sub { font-size: 11px; color: var(--muted); }
+.mapa { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
 .mapa svg { width: 100%; max-width: 680px; height: auto; margin: 0 auto; display: block; }
 .mapa path { stroke: var(--card); stroke-width: 1.2; stroke-linejoin: round; transition: fill .6s ease; }
 .mapa path:hover { stroke: var(--fg); stroke-width: 2; }
@@ -169,6 +176,7 @@ tr:last-child td { border-bottom: 0; }
   <section class="mapa">
     <svg id="mapa" role="img" aria-label="Mapa do Brasil com o candidato que lidera em cada estado"></svg>
     <div class="legenda" id="legenda"></div>
+    <div class="tip" id="tip" hidden></div>
   </section>
 
   <h2>Por região</h2>
@@ -405,15 +413,12 @@ function renderMapa(porUF) {
     return { pApu, p1, nome: rk[0].nome, cor: corDe(rk[0].n), forca: Math.min(85, 28 + (p1 - p2) * 2) };
   };
   const fill = i => i?.cor ? `color-mix(in srgb, ${i.cor} ${i.forca}%, var(--card))` : "var(--track)";
-  const dica = (nome, i) => !i ? `${nome}: sem dados` : i.cor
-    ? `${nome}: ${i.nome} ${fmtPct(i.p1, 1)} · ${fmtPct(i.pApu, 1)} das urnas apuradas`
-    : `${nome}: ${fmtPct(i.pApu, 1)} das urnas apuradas`;
 
   let formas = "", rotulos = "", ultimoY = -99;
   const ordemCallout = CALLOUT.filter(u => M.uf[u]).sort((a, b) => M.uf[a].y - M.uf[b].y);
   for (const [u, g] of Object.entries(M.uf)) {
     const i = info(u);
-    formas += `<path d="${g.d}" style="fill:${fill(i)}"><title>${esc(dica(u, i))}</title></path>`;
+    formas += `<path d="${g.d}" data-uf="${u}" style="fill:${fill(i)}"></path>`;
     if (CALLOUT.includes(u)) continue;
     const pc = i?.cor ? fmtPct(i.p1, 0) : "";
     rotulos += u === "DF"
@@ -428,12 +433,45 @@ function renderMapa(porUF) {
       + `<text x="${lx}" y="${ly + 4}">${u} <tspan class="pc num">${i?.cor ? fmtPct(i.p1, 0) : ""}</tspan></text>`;
   }
   const z = info("ZZ");
-  formas += `<rect x="16" y="${H - 64}" width="92" height="48" rx="6" style="fill:${fill(z)}"><title>${esc(dica("Exterior", z))}</title></rect>`;
+  formas += `<rect x="16" y="${H - 64}" width="92" height="48" rx="6" data-uf="ZZ" style="fill:${fill(z)}"></rect>`;
   rotulos += `<text x="62" y="${H - 44}" text-anchor="middle"><tspan x="62">Exterior</tspan><tspan class="pc num" x="62" dy="1.2em">${z?.cor ? fmtPct(z.p1, 0) : ""}</tspan></text>`;
+  porUFMapa = porUF;
   const svg = document.getElementById("mapa");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = formas + rotulos;
 }
+
+// Tooltip do mapa: urnas apuradas e votos de cada candidato no estado
+let porUFMapa = {};
+function tipHTML(u) {
+  const r = porUFMapa[u], nome = u === "ZZ" ? "Exterior" : u;
+  if (!r) return `<div class="t">${nome}</div><div class="sub">Sem dados</div>`;
+  const pApu = r.secTot ? r.secApu / r.secTot * 100 : 0;
+  return `<div class="t">${nome}</div>
+    <div class="row"><span>Urnas apuradas</span><span class="big num">${fmtPct(pApu, 1)}</span></div>
+    <div class="bar"><span style="width:${pApu}%"></span></div>
+    <div class="sub num">${fmtInt(r.secApu)} de ${fmtInt(r.secTot)} seções</div>
+    ${ordem.map(c => {
+      const v = r.cands.find(x => x.n === c.n)?.votos || 0;
+      return `<div class="row" style="--cc:${corDe(c.n)}"><span><i></i>${esc(c.nome)}</span><b class="num">${r.validos ? fmtPct(v / r.validos * 100, 1) : "—"}</b></div>`;
+    }).join("")}`;
+}
+(() => {
+  const tip = document.getElementById("tip"), svg = document.getElementById("mapa");
+  svg.addEventListener("pointermove", e => {
+    const u = e.target.closest?.("[data-uf]")?.dataset.uf;
+    if (!u) { tip.hidden = true; return; }
+    tip.innerHTML = tipHTML(u);
+    tip.hidden = false;
+    const box = svg.parentElement.getBoundingClientRect();
+    let x = e.clientX - box.left + 14, y = e.clientY - box.top + 14;
+    x = Math.max(8, Math.min(x, box.width - tip.offsetWidth - 8));
+    if (y + tip.offsetHeight > box.height - 8) y = e.clientY - box.top - tip.offsetHeight - 14;
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; });
+})();
 
 // Tempo real: a cada POLL_S segundos baixa só o arquivo nacional (1 requisição).
 // Quando o TSE publica uma nova totalização, o arquivo muda e aí recarrega todas as UFs.
